@@ -1,6 +1,7 @@
 #!node
 const DomParser = require('dom-parser');
 const parser = new DomParser();
+const fs = require('fs');
 
 let options = {
     recursive: false,
@@ -87,25 +88,67 @@ const getImages = async (links) => {
     let images_url = [];
     for (let link of links)
     {
-        let image_url = await fetch(link, {redirect: 'follow'}).then((response) => {
-            if (!response.ok)
-                throw new Error('Network response was not ok');
-            return response.text();
-        }).then((html) => {
-            const doc = parser.parseFromString(html, 'text/html');
-            //get all images on page
-            doc_images = doc.getElementsByTagName('img');
-            let my_images = [];
-            for (image of doc_images)
-            {
-                let ext = image.getAttribute('src').split('.').pop();
-                if (ext === 'jpg' || ext === 'jpeg' || ext === 'png' || ext === 'gif' || ext === 'bmp')
-                    my_images.push(image.getAttribute('src'))
-            }
-            return my_images;
-        }).catch((err) => {
-            // console.log(err)
-        })
+        let image_url;
+        if (fs.existsSync(link))
+        {
+            image_url = ((html) => {
+                const doc = parser.parseFromString(html, 'text/html');
+
+                const baseUrl = `file://${options.url}`;
+              
+                // Sélectionnez les balises <img> pour extraire les liens des images
+                const imageElements = doc.getElementsByTagName('img');
+                const imageLinks = Array.from(imageElements).map(element => {
+                  const imageUrl = element.getAttribute('src');
+                  const absoluteUrl = new URL(imageUrl, baseUrl).href;
+                  return absoluteUrl;
+                });
+
+               
+                let my_images = [];
+                for (image of imageLinks)
+                {
+                    let ext = image.split('.').pop();
+                    if (ext === 'jpg' || ext === 'jpeg' || ext === 'png' || ext === 'gif' || ext === 'bmp')
+                       my_images.push(image)
+                }
+                return my_images;
+            })(fs.readFileSync(link, 'utf8'))
+        }
+        else
+        {
+            image_url = await fetch(link, {redirect: 'follow'}).then((response) => {
+                if (!response.ok)
+                    throw new Error('Network response was not ok');
+                return response.text();
+            }).then((html) => {
+                const doc = parser.parseFromString(html, 'text/html');
+                //get all images on page
+                doc_images = doc.getElementsByTagName('img');
+
+                const imageLinks = Array.from(doc_images).map(element => {
+                    const imageUrl = element.getAttribute('src');
+                    const absoluteUrl = new URL(imageUrl, options.url).href;
+                    return absoluteUrl;
+                  });
+
+
+
+
+
+                // console.log(doc_images)
+                let my_images = [];
+                for (image of imageLinks)
+                {
+                    let ext = image.split('.').pop();
+                    if (ext === 'jpg' || ext === 'jpeg' || ext === 'png' || ext === 'gif' || ext === 'bmp')
+                       my_images.push(image)
+                }
+                return my_images;
+            }).catch((err) => {
+                // console.log(err)
+            })
+        }
         if (image_url !== undefined)
         {
             for (let image of image_url)
@@ -128,25 +171,37 @@ const saveImages = async (images, path) => {
     for (let image of images)
     {
         //download image
-        image = image.replace('https://wordpress', 'https://www');
-        let image_data = await fetch(image, {redirect: 'follow'}).then((response) => {
-            if (!response.ok)
-                throw new Error(`Network response was not ok : ${response.status}`);
-            return response.blob();
+        if (image.startsWith('http://') || image.startsWith('https://'))
+        {
+            image = image.replace('https://wordpress', 'https://www');
+            let image_data = await fetch(image, {redirect: 'follow'}).then((response) => {
+                if (!response.ok)
+                    throw new Error(`Network response was not ok : ${response.status}`);
+                return response.blob();
+            }
+            ).catch((err) => {})
+            if (image_data === undefined)
+                continue;
+            let data_tmp = await image_data.arrayBuffer();
+            let data = await Buffer.from(data_tmp)
+
+            //get image name
+            let image_name = image.split('/').pop();
+
+            //save buffer with image name on path
+            fs.writeFile(path + '/' + image_name, data, (err) => {
+                if (err) throw err;
+            });
         }
-        ).catch((err) => {})
-        if (image_data === undefined)
-            continue;
-        let data_tmp = await image_data.arrayBuffer();
-        let data = await Buffer.from(data_tmp)
-
-        //get image name
-        let image_name = image.split('/').pop();
-
-        //save buffer with image name on path
-        fs.writeFile(path + '/' + image_name, data, (err) => {
-            if (err) throw err;
-        });
+        else {
+            if (fs.existsSync(image.substring(7)))
+            {
+                let image_name = image.substring(7).split('/').pop();
+                fs.copyFile(image.substring(7), path + '/' + image_name, (err) => {
+                    if (err) throw err;
+                });
+            }
+        }
     }
 }
 
@@ -165,15 +220,23 @@ const main = async () => {
         {
             for (let url of current_url_set)
             {
-                let links = await fetch(url, {redirect: 'follow'}).then((response) => {
-                    if (!response.ok)
-                        throw new Error('Network response was not ok');
-                    return response.text();
-                }).then((html) => {
-                    return findLinks(url, html);
-                }).catch((err) => {
-                    // console.log(err)
-                })
+                let links;
+                if (fs.existsSync(url))
+                {
+                    file = fs.readFileSync(url, 'utf8')
+                    links = await findLinks(url, file);
+                }
+                else {
+                    links = await fetch(url, {redirect: 'follow'}).then((response) => {
+                        if (!response.ok)
+                            throw new Error('Network response was not ok');
+                        return response.text();
+                    }).then((html) => {
+                        return findLinks(url, html);
+                    }).catch((err) => {
+                        // console.log(err)
+                    })
+                }
                 if (links === undefined)
                     continue;
                next_url_set = new Set([...next_url_set, ...links]);
