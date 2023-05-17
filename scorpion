@@ -28,13 +28,14 @@ const parse_metadata = async (path) => {
 }
 
 const print_metadata = (file, metadata) => {
+
 	let i = 0;
     for (let key in metadata)
     {
 		if (i === Object.keys(metadata).length - 1)
-			console.log("└> " + key + ": " + metadata[key]);
+			console.log("└> " + key + ": " , metadata[key]);
 		else
-        	console.log("├> " + key + ": " + metadata[key]);
+        	console.log("├> " + key + ": " , metadata[key]);
 		i++;
     }
 }
@@ -226,7 +227,14 @@ const extract_metadata_jpg = async (file, metadata) => {
 				chunkData.readUInt32BE.bind(chunkData);
 
 			let exif_offset = read32(4);
-			let numEntries = read16(exif_offset);
+			let numEntries;
+			try {
+				numEntries = read16(exif_offset);
+			}
+			catch (e) {
+				offset += length;
+				continue;
+			}	
 		
 			exif_offset += 2 // Skip the numEntries field
 
